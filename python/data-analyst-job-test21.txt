@@ -1,0 +1,135 @@
+=== Part I: SQL Questions ===
+
+For these questions, please write a SQL query that can produce the specified results.
+Oracle-compatible SQL is preferred. You should be able to get results with a single query --
+but if you need to use multiple queries, show how you would use further scripting to produce
+the desired result.
+
+The questions all pertain to the following datamodel:
+
+subscriptions (ongoing subscriptions to the site, renewed with periodic payments)
+  subscription_id (number, primary key)
+  subscription_type (1=school, 2=family, 3=corporation)
+  status (1=active, 2=expired)
+  num_students_allowed (number)
+
+payments (individual payment transactions, to initiate, renew, or upgrade a subscription)
+  payment_id (number, primary key)
+  subscription_id (foreign key to subscriptions)
+  payment_date (exact transaction date)
+  payment_amount (amount of money in USD)
+
+students (individual student users, each associated to a specific subscription)
+  student_id (number, primary key)
+  subscription_id (foreign key to subscriptions)
+  username
+
+student_practice_days
+where  (one row is created for each day a given student practices)
+  practice_date (date, truncated to midnight)
+  student_id (foreign key to students)
+
+1. Sales wants to get a time-series report of total payments by month, in dollars, for *family*
+subscriptions only. Create a SQL statement that produces a time-series CSV such as the following:
+
+  2015-02,543256
+  2015-03,654321
+  2015-04,432566
+  2015-05,774313
+  ...
+
+select TO_CHAR(payment_date, 'YYYY-MON') payment_date, sum(payment_amount) as monthly_total
+from payments, subscriptions
+where payments.subscription_id=subscriptions.subscription_id and subscription_type=2
+group by payment_date;
+
+2. A large customer, subscription_id = 12345, has asked that we provide a listing of the top 10
+students within the subscription who have practiced on the most number of days within the last
+calendar month. Create a SQL statement to list these students. Your result should include the
+student username and the number of days that student practiced.
+
+select username, days 
+from (
+  select username, count(practice_date) as days
+  from students, student_practice_days
+  where students.subscription_id=12345 
+        and practice_date between add_months(trunc(sysdate,'mm'),-1) and last_day(add_months(trunc(sysdate,'mm'),-1)) 
+        and students.student_id=student_practice_days.student_id 
+  group by student_practice_days.student_id
+  order by days DESC)
+where ROWNUM <=10;
+
+3. We want to identify customers who are not fully utilizing the service, and thus may be at
+risk of canceling. We will define the level of utilization for a subscription as:
+
+    total number of students actively practicing
+  ------------------------------------------------
+             num_students_allowed
+
+To be "actively practicing", a given student must have practiced on at least 30 distinct
+calendar days over the last 90 calendar days.
+
+Write a SQL statement that lists the subscription_ids for all of the school subscriptions with
+status *active*, alongside the level of utilization for each.
+
+select id, count(studentid)/num_students_allowed as utilization
+from (
+  select id, num_students_allowed, studentid, count(practice_date) as days
+  from (
+    select distinct subscriptions.subscription_id as id, num_students_allowed, student_practice_days.student_id as studentid, practice_date
+    from subscriptions, students, student_practice_days
+    where subscription_type=1
+          and status=1
+          and subscriptions.subscription_id=students.subscription_id
+          and students.student_id=student_practice_days.student_id
+          and practice_date >= sysdate - 90
+  )
+  group by studentid
+)
+where days>=30
+group by id
+
+
+=== Part II: Scripting Questions ===
+
+For these questions, you should use the scripting language and computing environment of your
+choice -- for example, Bash, Perl, Python, R, or Java, etc.
+
+Our webservers generate logs containing one line per browser request. A sample log snippet
+looks like this:
+
+...
+date=2015-04-25:16:43:22 visitor=xxyy1234567 url=/search?triangles
+date=2015-04-25:16:43:28 visitor=abcd8988721 url=/practice?skill=423
+date=2015-04-25:16:43:49 visitor=xxyy1234567 url=/practice?skill=182
+...
+
+The "visitor" field helps us identify distinct visitors to the site. It contains a semirandom
+value that is assigned the first time a given user/browser/computer sends a request. Different
+requests will generally have the same visitor value iff they come from the same
+user/browser/computer.
+
+1. Write a script to analyze the log entries for one day and produce a listing of the total
+number of requests that were logged, by hour of day. For example, your output might look like:
+
+00,234556
+01,345623
+02,333925
+03,452341
+04,562342
+05,602342
+06,823456
+...
+
+2. Write a similar script which produces a listing not of total requests, but of total distinct
+visitors by hour.
+
+3. The Search team wants to understand how well the search feature is contributing to new
+memberships. Write a script that scans the log entries for a day for URLs that begin with either
+"/search" or "/signup", and then answers these two related questions:
+
+a. What percentage of distinct visitors who request a "/search" URL end up requesting a
+"/signup" URL later on the same day?
+
+b. What percentage of distinct visitors who request a "/signup" URL have requested a "/search"
+URL earlier on the same day?
